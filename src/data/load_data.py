@@ -24,7 +24,7 @@ def load_raw_data(config: Config) -> pd.DataFrame:
         FileNotFoundError: If the raw CSV isn't at `config.raw_data_path`.
     """
     df = pd.read_csv(config.raw_data_path)
-    df[config.date_column] = pd.to_datetime(df[config.date_column])
+    df[config.date_column] = pd.to_datetime(df[config.date_column], format="%Y-%m-%d")
     df = df.sort_values(config.date_column)
     df = df.drop_duplicates(subset=config.date_column, keep="last")
     df = df.set_index(config.date_column)

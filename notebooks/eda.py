@@ -45,7 +45,7 @@ def plot_seasonal_decomposition(df: pd.DataFrame, config: Config, out_path: str)
     daily = df[config.target_column].asfreq("D")
     daily = daily.interpolate(method="linear")
 
-    result = seasonal_decompose(daily, model="additive", period=365, extrapolate_trend="freq")
+    result = seasonal_decompose(daily, model="additive", period=365, extrapolate_trend="period")
 
     fig, axes = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
     axes[0].plot(result.observed, color="#2C3E50")
