@@ -19,11 +19,23 @@ class Config:
     metrics_path: str = "reports/metrics.json"
     model_path: str = "reports/model.joblib"
 
-    # Column names — adjust these three if the downloaded CSV's
-    # headers differ from Kaggle's default export.
-    date_column: str = "Date"
-    target_column: str = "AQI"
-    temperature_column: str = "Temperature"
+    # Column names — match the actual Kaggle export exactly.
+    date_column: str = "date"
+    target_column: str = "aqi_pm2.5"
+
+    # Weather feature columns used for forecasting. Using the
+    # avg_* variants as the primary signal (min/max kept available
+    # in raw data but not used as features by default — adding them
+    # is a straightforward extension, noted in README Future Work).
+    weather_columns: List[str] = field(
+        default_factory=lambda: [
+            "avg_temp_f",
+            "avg_dew_point_f",
+            "avg_humidity_percent",
+            "avg_wind_speed_mph",
+            "avg_pressure_in",
+        ]
+    )
 
     # Chronological split — NEVER random-shuffle a time series.
     # The most recent `test_frac` of the series is held out for
@@ -31,7 +43,7 @@ class Config:
     test_frac: float = 0.15
     val_frac: float = 0.15
 
-    # Feature engineering
+    # Feature engineering — lags/rolling windows on the target itself
     lag_days: List[int] = field(default_factory=lambda: [1, 2, 3, 7, 14])
     rolling_windows: List[int] = field(default_factory=lambda: [3, 7, 14])
 
