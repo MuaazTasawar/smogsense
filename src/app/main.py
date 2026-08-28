@@ -5,12 +5,12 @@ Run with:
 Then POST daily history to /predict — see the HistoryRequest schema.
 """
 
-from datetime import date
+from datetime import date as date_type
 from typing import List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.config import Config
 from src.predict import predict_next_day
@@ -27,16 +27,15 @@ config = Config()
 class DailyRecord(BaseModel):
     """One day of AQI + weather history, matching the training schema."""
 
-    date: date = Field(..., description="Calendar date of this record.")
+    model_config = ConfigDict(populate_by_name=True)
+
+    record_date: date_type = Field(..., alias="date", description="Calendar date of this record.")
     aqi_pm2_5: float = Field(..., alias="aqi_pm2.5", description="Observed AQI (PM2.5) for this date.")
     avg_temp_f: float
     avg_dew_point_f: float
     avg_humidity_percent: float
     avg_wind_speed_mph: float
     avg_pressure_in: float
-
-    class Config:
-        populate_by_name = True
 
 
 class HistoryRequest(BaseModel):
@@ -83,8 +82,9 @@ def predict(request: HistoryRequest) -> dict:
             run yet) or the history is too short/gappy to build a
             complete feature row.
     """
-    rows = [r.dict(by_alias=True) for r in request.records]
-    history = pd.DataFrame(rows).set_index("date")
+    rows = [r.model_dump(by_alias=False) for r in request.records]
+    df = pd.DataFrame(rows).rename(columns={"record_date": "date", "aqi_pm2_5": config.target_column})
+    history = df.set_index("date")
     history.index = pd.to_datetime(history.index)
 
     try:
