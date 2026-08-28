@@ -23,8 +23,35 @@ from src.config import Config
 from src.models.model import split_X_y
 
 
+def _reindex_continuous(dates, y_true, y_pred):
+    """Reindex test predictions onto a continuous daily date range.
+
+    The test set has gap days removed by preprocessing's dropna(), so
+    plotting the raw (dates, values) arrays as a connected line draws
+    a misleading straight segment across real data gaps. Reindexing
+    onto a continuous daily range and leaving gaps as NaN makes
+    matplotlib break the line at gaps instead of faking continuity.
+
+    Args:
+        dates: DatetimeIndex for the test set (may have gaps).
+        y_true: Actual AQI values aligned with `dates`.
+        y_pred: Predicted AQI values aligned with `dates`.
+
+    Returns:
+        Tuple of (full_index, y_true_series, y_pred_series), each
+        Series reindexed onto `full_index` with NaN at gap dates.
+    """
+    full_index = pd.date_range(dates.min(), dates.max(), freq="D")
+    y_true_series = pd.Series(np.array(y_true), index=dates).reindex(full_index)
+    y_pred_series = pd.Series(np.array(y_pred), index=dates).reindex(full_index)
+    return full_index, y_true_series, y_pred_series
+
+
 def plot_actual_vs_predicted_over_time(dates, y_true, y_pred, out_path: str) -> None:
     """Save a line plot of actual vs predicted AQI across the test window.
+
+    Reindexed onto a continuous daily range first so real data gaps
+    show up as breaks in the line, not straight-line interpolation.
 
     Args:
         dates: DatetimeIndex for the test set, chronologically ordered.
@@ -32,9 +59,10 @@ def plot_actual_vs_predicted_over_time(dates, y_true, y_pred, out_path: str) -> 
         y_pred: Predicted AQI values.
         out_path: Destination PNG path.
     """
+    full_index, y_true_series, y_pred_series = _reindex_continuous(dates, y_true, y_pred)
     fig, ax = plt.subplots(figsize=(12, 4))
-    ax.plot(dates, y_true, label="Actual", color="#2C3E50", linewidth=1.2)
-    ax.plot(dates, y_pred, label="Predicted", color="#E67E22", linewidth=1.2, alpha=0.85)
+    ax.plot(full_index, y_true_series, label="Actual", color="#2C3E50", linewidth=1.2)
+    ax.plot(full_index, y_pred_series, label="Predicted", color="#E67E22", linewidth=1.2, alpha=0.85)
     ax.set_title("Test Set — Actual vs Predicted Next-Day AQI")
     ax.set_xlabel("Date")
     ax.set_ylabel("AQI (PM2.5)")
@@ -46,9 +74,11 @@ def plot_actual_vs_predicted_over_time(dates, y_true, y_pred, out_path: str) -> 
 def plot_residuals_over_time(dates, y_true, y_pred, out_path: str) -> None:
     """Save residuals (actual - predicted) plotted across the test window.
 
-    A residual pattern clustered around specific dates suggests a
-    regime shift the model hadn't seen; a uniformly elevated residual
-    band across the whole window suggests overfitting instead.
+    Reindexed onto a continuous daily range first (see
+    `_reindex_continuous`) so gaps show as breaks, not a misleading
+    straight line. A residual pattern clustered around specific dates
+    suggests a regime the model struggles with (e.g. rapid AQI
+    transitions); a uniformly elevated band suggests overfitting.
 
     Args:
         dates: DatetimeIndex for the test set, chronologically ordered.
@@ -56,9 +86,10 @@ def plot_residuals_over_time(dates, y_true, y_pred, out_path: str) -> None:
         y_pred: Predicted AQI values.
         out_path: Destination PNG path.
     """
-    residuals = np.array(y_true) - np.array(y_pred)
+    full_index, y_true_series, y_pred_series = _reindex_continuous(dates, y_true, y_pred)
+    residuals = y_true_series - y_pred_series
     fig, ax = plt.subplots(figsize=(12, 4))
-    ax.plot(dates, residuals, color="#8E44AD", linewidth=1.0)
+    ax.plot(full_index, residuals, color="#8E44AD", linewidth=1.0)
     ax.axhline(0, color="black", linestyle="--", linewidth=0.8)
     ax.set_title("Test Set — Residuals Over Time (Actual - Predicted)")
     ax.set_xlabel("Date")
