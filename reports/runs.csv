@@ -1,0 +1,2 @@
+timestamp,model,n_estimators,learning_rate,max_depth,train_rmse,train_mae,val_rmse,val_mae
+2026-08-28T23:31:20.854344+00:00,GradientBoostingRegressor,300,0.05,3,24.66998323783707,18.666510506087985,50.41418453016156,35.598593454348055
