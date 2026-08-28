@@ -37,6 +37,13 @@ class Config:
         ]
     )
 
+    # Gap handling: after reindexing to a continuous daily series,
+    # interpolate runs of missing days up to this length. Longer gaps
+    # are left as NaN and dropped rather than synthetically filled —
+    # ~21% of the target series is missing (see MODEL_CARD.md), so
+    # this threshold is a real, stated modeling decision, not a detail.
+    max_interpolation_gap_days: int = 3
+
     # Chronological split — NEVER random-shuffle a time series.
     # The most recent `test_frac` of the series is held out for
     # final evaluation, and the `val_frac` before that for tuning.
