@@ -44,6 +44,45 @@ def reindex_and_interpolate(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     return daily
 
 
+def build_feature_columns(df: pd.DataFrame, config: Config) -> pd.DataFrame:
+    """Build the lag/rolling/weather feature columns (no target).
+
+    This is the single source of truth for feature construction, used
+    both by `build_features` (training, which adds a target column)
+    and by `predict.py` at inference time (which needs the identical
+    column set, order, and definitions applied to fresh history, with
+    no target available). Keeping this in one function is what
+    guarantees train/inference consistency.
+
+    Args:
+        df: Continuous-daily-index DataFrame from `reindex_and_interpolate`.
+        config: Project config with `target_column`, `weather_columns`,
+            `lag_days`, `rolling_windows`.
+
+    Returns:
+        DataFrame with feature columns only (lag_*, roll_mean_*,
+        roll_std_*, then weather columns), same index as `df`. Rows
+        near the start of `df` will contain NaN where insufficient
+        lag/rolling history exists — not dropped here, left to the
+        caller (training drops via `build_features`; inference should
+        use the last row where the history window is fully covered).
+    """
+    out = pd.DataFrame(index=df.index)
+
+    for lag in config.lag_days:
+        out[f"aqi_lag_{lag}"] = df[config.target_column].shift(lag)
+
+    for window in config.rolling_windows:
+        shifted = df[config.target_column].shift(1)
+        out[f"aqi_roll_mean_{window}"] = shifted.rolling(window).mean()
+        out[f"aqi_roll_std_{window}"] = shifted.rolling(window).std()
+
+    for col in config.weather_columns:
+        out[col] = df[col]
+
+    return out
+
+
 def build_features(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     """Build the supervised next-day-forecast feature/target frame.
 
@@ -59,27 +98,16 @@ def build_features(df: pd.DataFrame, config: Config) -> pd.DataFrame:
 
     Args:
         df: Continuous-daily-index DataFrame from `reindex_and_interpolate`.
-        config: Project config with `target_column`, `weather_columns`,
-            `lag_days`, `rolling_windows`.
+        config: Project config with `target_column`, `lag_days`,
+            `rolling_windows`, `weather_columns`.
 
     Returns:
-        DataFrame with feature columns, a `target` column (next-day
-        AQI), and rows with any NaN (insufficient lag history, the
-        final undated row, or an unfilled long gap) dropped.
+        DataFrame with feature columns (from `build_feature_columns`),
+        a `target` column (next-day AQI), and rows with any NaN
+        (insufficient lag history, the final undated row, or an
+        unfilled long gap) dropped.
     """
-    out = pd.DataFrame(index=df.index)
-
-    for lag in config.lag_days:
-        out[f"aqi_lag_{lag}"] = df[config.target_column].shift(lag)
-
-    for window in config.rolling_windows:
-        shifted = df[config.target_column].shift(1)
-        out[f"aqi_roll_mean_{window}"] = shifted.rolling(window).mean()
-        out[f"aqi_roll_std_{window}"] = shifted.rolling(window).std()
-
-    for col in config.weather_columns:
-        out[col] = df[col]
-
+    out = build_feature_columns(df, config)
     out["target"] = df[config.target_column].shift(-1)
 
     before = len(out)
