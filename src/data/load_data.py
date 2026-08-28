@@ -24,10 +24,19 @@ def load_raw_data(config: Config) -> pd.DataFrame:
         FileNotFoundError: If the raw CSV isn't at `config.raw_data_path`.
     """
     df = pd.read_csv(config.raw_data_path)
-    df[config.date_column] = pd.to_datetime(df[config.date_column], format="%Y-%m-%d")
+    # Source format is DD-MM-YY (e.g. "13-06-19" -> 2019-06-13). Confirmed
+    # by a parse failure on day-13 under an MM-DD-YY assumption, since 13
+    # is not a valid month.
+    df[config.date_column] = pd.to_datetime(df[config.date_column], format="%d-%m-%y")
     df = df.sort_values(config.date_column)
     df = df.drop_duplicates(subset=config.date_column, keep="last")
     df = df.set_index(config.date_column)
+
+    # Sanity check printed on every load: catches a silently-wrong date
+    # format immediately (e.g. a flipped day/month) instead of it only
+    # surfacing later as a confusing downstream bug.
+    print(f"load_raw_data: parsed {len(df)} rows, date range {df.index.min().date()} to {df.index.max().date()}")
+
     return df
 
 
