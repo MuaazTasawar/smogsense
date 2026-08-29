@@ -7,8 +7,8 @@ Forecasts next-day AQI (PM2.5) for Lahore, Pakistan, from a recent window of dai
 ## Training Data
 
 - Source: Lahore Air Quality Index (Kaggle: shabbirchinioti/lahore-air-quality-index), date-wise AQI (PM2.5) and weather data for Lahore.
-- Coverage: 2019-06-01 to 2023-11-30, 1,644 raw daily rows out of 1,801 possible calendar days (~8.7% of calendar days entirely absent from the source).
-- Missingness: an additional 221 rows had a null aqi_pm2.5 value even where a row existed. Combined, roughly 21% of the target series required either short-gap interpolation (gaps <= 3 days, linearly filled) or row exclusion (longer gaps, dropped rather than synthetically filled) before feature construction. After lag/rolling feature construction and gap-drop, 1,285 usable rows remained.
+- Coverage: 2019-06-01 to 2023-11-30 — 1,644 rows for 1,644 calendar days in that range. The calendar coverage is complete (0 missing days); an earlier draft of this document reported 157 missing calendar days, which was an artifact of a date-parsing bug (the source date format is DD-MM-YY, and an initial incorrect parse produced a scrambled, wider apparent date range). That bug was fixed in load_data.py before training; this corrected figure reflects the actual data.
+- Missingness: 221 of the 1,644 rows have a null aqi_pm2.5 value (~13.4% of rows) despite the row/date existing. This is the real source of missingness in this dataset. Short runs of missing values (<= 3 consecutive days) are linearly interpolated; longer runs are left as NaN and dropped rather than synthetically filled. After lag/rolling feature construction (which also drops the first ~14 rows for lack of lag history) and gap-drop, 1,285 usable rows remained — 359 rows dropped in total.
 - Known bias: this is a single-city dataset; the model has no exposure to other cities pollution dynamics (different traffic patterns, industrial mix, geography) and should not be assumed to generalize beyond Lahore.
 
 ## Model Architecture / Algorithm

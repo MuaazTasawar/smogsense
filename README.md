@@ -55,12 +55,13 @@ max_wind_speed_mph, avg_wind_speed_mph, min_wind_speed_mph,
 max_pressure_in, avg_pressure_in, min_pressure_in
 ```
 
-**Coverage:** 2019-06-01 to 2023-11-30 — 1,644 raw rows out of 1,801 possible calendar days.
+**Coverage:** 2019-06-01 to 2023-11-30 — 1,644 rows, one for every calendar day in that range (calendar coverage is complete; there's no gap in *which days exist*).
 
-**The data is genuinely incomplete, and that's stated upfront rather than glossed over:**
-- **157 calendar days are entirely missing** from the source (~8.7% of the date range has no row at all)
-- **221 additional rows have a null `aqi_pm2.5` value** even where the row exists
-- Combined, **roughly 21% of the target series required handling** before it could be used for training
+**The data is genuinely incomplete in a different way, and that's stated upfront rather than glossed over:**
+- **221 of the 1,644 rows have a null `aqi_pm2.5` value** (~13.4% of rows) — the row and date exist, but the reading itself is missing
+- After gap-bounded interpolation and dropping rows with insufficient lag history or unfillable gaps, **359 rows are excluded**, leaving **1,285 usable rows** for training
+
+*(An earlier version of this README reported "157 missing calendar days," which turned out to be an artifact of a date-parsing bug caught and fixed during development — see [Bugs Found & Fixed Along the Way](#bugs-found--fixed-along-the-way). Re-running the pipeline from a clean clone confirmed calendar coverage is actually complete; only the `aqi_pm2.5` values themselves are the real source of missingness.)*
 
 This is a real modeling decision point, not a footnote — see [How the Pipeline Works](#how-the-pipeline-works) for exactly how it's handled.
 
@@ -284,6 +285,7 @@ Left in, on purpose, because a portfolio project that shows *zero* friction is l
 - **Matplotlib line-gap artifact:** early evaluation plots drew a misleading straight line across real data gaps (dropped rows) instead of showing a break — fixed by reindexing onto a continuous daily axis before plotting, so gaps render as gaps.
 - **Pydantic v2 field/type name clash:** the FastAPI schema originally had a field named `date` typed as `date`, which pydantic v2 rejects outright — fixed by renaming the field and aliasing it, plus migrating to the `ConfigDict`-based v2 config style instead of the deprecated nested-`Config`-class pattern.
 - **Import path issue:** running `eda.py` directly failed with `ModuleNotFoundError: No module named 'src'` because Python only puts a script's own directory on `sys.path`, not the project root — fixed with an explicit `sys.path` insert at the top of every standalone entrypoint.
+- **Stale documentation after an upstream fix:** the original missing-data audit (run before the date-format bug above was fixed) reported "157 missing calendar days," and that number made it into the first draft of this README and the Model Card. It was never re-verified after the date-parsing fix — a fresh clone-and-rerun later confirmed calendar coverage is actually complete (0 missing days) and the real missingness is the 221 null `aqi_pm2.5` readings. Caught by literally re-running the pipeline from scratch on a clean clone rather than trusting numbers that had been typed into a doc once and never re-checked — the same discipline this project tries to apply to the model's own metrics.
 
 ## Future Work
 
