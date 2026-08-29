@@ -57,15 +57,18 @@ class Config:
     min_samples_leaf: int = 10
 
     # Tail sample-weighting: trains with sample_weight=y_train (linear
-    # upweighting by AQI magnitude). This is a genuine trade-off, not a
-    # free improvement -- see src/tail_experiment.py's results: it
-    # improves tail MAE (>250 AQI) and shrinks the underprediction bias
-    # on high-AQI days, at the cost of worse overall RMSE/MAE. Enabled
-    # by default because MODEL_CARD.md's Ethical Considerations section
-    # already states a false "safe" prediction on a hazardous day is a
-    # more costly error than a false alarm -- this setting is that
-    # principle applied, not an arbitrary default. Set to False to
-    # revert to the pure-accuracy-optimized baseline.
+    # upweighting by AQI magnitude). Real accuracy/bias trade-off --
+    # see src/tail_experiment.py. Enabled by default per this project's
+    # own stated ethics (MODEL_CARD.md): a false "safe" prediction on a
+    # hazardous day is more costly than a false alarm.
     use_tail_sample_weighting: bool = True
+
+    # Quantile regression bounds for a real, calibrated uncertainty
+    # band (replaces the earlier naive forecast +/- test_RMSE
+    # heuristic). 0.1/0.9 gives an 80% interval.
+    quantile_low: float = 0.1
+    quantile_high: float = 0.9
+    quantile_low_model_path: str = "reports/model_quantile_low.joblib"
+    quantile_high_model_path: str = "reports/model_quantile_high.joblib"
 
     random_state: int = 42

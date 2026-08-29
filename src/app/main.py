@@ -53,11 +53,18 @@ class HistoryRequest(BaseModel):
 
 
 class ForecastResponse(BaseModel):
-    """Response: the forecast plus a naive uncertainty band."""
+    """Response: the forecast plus an uncertainty band.
+
+    band_type is "quantile" once src/train_quantiles.py has been run
+    (real, asymmetric, data-derived interval — 73.4% empirical coverage
+    against an 80% target, see MODEL_CARD.md), or "naive_rmse" as a
+    fallback if the quantile models haven't been trained yet.
+    """
 
     as_of_date: str
     forecast_aqi: float
     uncertainty_band: Optional[dict]
+    band_type: Optional[str]
 
 
 @app.get("/health")
@@ -74,13 +81,12 @@ def predict(request: HistoryRequest) -> dict:
         request: HistoryRequest with a `records` list of DailyRecord.
 
     Returns:
-        ForecastResponse with the as-of date, forecast AQI, and a
-        naive uncertainty band derived from Phase 5's test RMSE.
+        ForecastResponse with the as-of date, forecast AQI, and an
+        uncertainty band (see ForecastResponse docstring for band_type).
 
     Raises:
-        HTTPException: 400 if the model can't be loaded (Phase 4 not
-            run yet) or the history is too short/gappy to build a
-            complete feature row.
+        HTTPException: 400 if the model can't be loaded or the history
+            is too short/gappy to build a complete feature row.
     """
     rows = [r.model_dump(by_alias=False) for r in request.records]
     df = pd.DataFrame(rows).rename(columns={"record_date": "date", "aqi_pm2_5": config.target_column})
@@ -90,6 +96,6 @@ def predict(request: HistoryRequest) -> dict:
     try:
         return predict_next_day(history, config)
     except FileNotFoundError:
-        raise HTTPException(status_code=400, detail="Model not found — run Phase 4 (src/train.py) first.")
+        raise HTTPException(status_code=400, detail="Model not found — run src/train.py first.")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
