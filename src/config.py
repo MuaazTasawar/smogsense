@@ -7,7 +7,7 @@ class Config:
     """Central config for the SmogSense forecasting pipeline.
 
     No hyperparameters or paths should live anywhere else in the
-    codebase — every script imports this dataclass instead of
+    codebase -- every script imports this dataclass instead of
     hardcoding values.
     """
 
@@ -19,13 +19,13 @@ class Config:
     metrics_path: str = "reports/metrics.json"
     model_path: str = "reports/model.joblib"
 
-    # Column names — match the actual Kaggle export exactly.
+    # Column names -- match the actual Kaggle export exactly.
     date_column: str = "date"
     target_column: str = "aqi_pm2.5"
 
     # Weather feature columns used for forecasting. Using the
     # avg_* variants as the primary signal (min/max kept available
-    # in raw data but not used as features by default — adding them
+    # in raw data but not used as features by default -- adding them
     # is a straightforward extension, noted in README Future Work).
     weather_columns: List[str] = field(
         default_factory=lambda: [
@@ -39,24 +39,31 @@ class Config:
 
     # Gap handling: after reindexing to a continuous daily series,
     # interpolate runs of missing days up to this length. Longer gaps
-    # are left as NaN and dropped rather than synthetically filled —
-    # ~21% of the target series is missing (see MODEL_CARD.md), so
+    # are left as NaN and dropped rather than synthetically filled --
+    # ~13.4% of rows have a null target value (see MODEL_CARD.md), so
     # this threshold is a real, stated modeling decision, not a detail.
     max_interpolation_gap_days: int = 3
 
-    # Chronological split — NEVER random-shuffle a time series.
-    # The most recent `test_frac` of the series is held out for
-    # final evaluation, and the `val_frac` before that for tuning.
+    # Chronological split -- NEVER random-shuffle a time series.
+    # The most recent test_frac of the series is held out for
+    # final evaluation, and the val_frac before that for tuning.
     test_frac: float = 0.15
     val_frac: float = 0.15
 
-    # Feature engineering — lags/rolling windows on the target itself
+    # Feature engineering -- lags/rolling windows on the target itself
     lag_days: List[int] = field(default_factory=lambda: [1, 2, 3, 7, 14])
     rolling_windows: List[int] = field(default_factory=lambda: [3, 7, 14])
 
-    # Model hyperparameters (GradientBoostingRegressor baseline)
-    n_estimators: int = 300
+    # Model hyperparameters (GradientBoostingRegressor baseline).
+    # subsample < 1.0 and min_samples_leaf > 1 turn this into stochastic
+    # GBM, which regularizes against the overfitting seen in the first
+    # baseline (train RMSE 24.67 vs val 50.41, gap 25.74). These values
+    # were selected by src/tune.py's grid search over the chronological
+    # val split: val RMSE 50.41 -> 46.54, gap 25.74 -> 13.66.
+    n_estimators: int = 100
     learning_rate: float = 0.05
     max_depth: int = 3
+    subsample: float = 0.85
+    min_samples_leaf: int = 10
 
     random_state: int = 42

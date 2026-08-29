@@ -4,7 +4,6 @@ Run as:
     python -m src.train
 """
 
-import csv
 import os
 from datetime import datetime, timezone
 
@@ -20,20 +19,11 @@ from src.utils.seed import set_seed
 
 
 def plot_feature_importance(feature_names, importances, out_path: str, top_n: int = 15) -> None:
-    """Save a horizontal bar chart of the top-N most important features.
-
-    Args:
-        feature_names: Sequence of feature column names, same order as
-            `importances`.
-        importances: Sequence of importance scores from the fitted
-            estimator.
-        out_path: Destination PNG path.
-        top_n: How many top features to display.
-    """
+    """Save a horizontal bar chart of the top-N most important features."""
     order = np.argsort(importances)[-top_n:]
     fig, ax = plt.subplots(figsize=(8, max(4, top_n * 0.3)))
     ax.barh(np.array(feature_names)[order], np.array(importances)[order], color="#2980B9")
-    ax.set_title(f"Top {top_n} Feature Importances — GBM AQI Forecast")
+    ax.set_title(f"Top {top_n} Feature Importances -- GBM AQI Forecast")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -41,21 +31,32 @@ def plot_feature_importance(feature_names, importances, out_path: str, top_n: in
 def log_run(config: Config, metrics: dict) -> None:
     """Append one row of run metadata + metrics to reports/runs.csv.
 
-    Creates the file with a header on first run; appends thereafter.
+    Uses pandas concat + rewrite rather than a raw CSV append. This
+    project's run schema will keep evolving across phases (subsample
+    and min_samples_leaf are new this phase, use_tail_sample_weighting
+    arrives next phase) -- a naive csv.DictWriter append would silently
+    misalign columns the moment a new run's dict has different keys
+    than whatever the file's existing header happens to be. Reading +
+    concatenating + rewriting with pandas instead means mismatched
+    columns become NaN for the rows that don't have them, rather than
+    corrupting the file.
 
     Args:
-        config: Project config with `runs_log_path`.
+        config: Project config with runs_log_path.
         metrics: Dict of metric name -> value, plus any run metadata,
             to write as one CSV row.
     """
     row = {"timestamp": datetime.now(timezone.utc).isoformat(), **metrics}
-    file_exists = os.path.exists(config.runs_log_path)
     os.makedirs(os.path.dirname(config.runs_log_path), exist_ok=True)
-    with open(config.runs_log_path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(row)
+
+    new_row_df = pd.DataFrame([row])
+    if os.path.exists(config.runs_log_path):
+        existing_df = pd.read_csv(config.runs_log_path)
+        combined = pd.concat([existing_df, new_row_df], ignore_index=True, sort=False)
+    else:
+        combined = new_row_df
+
+    combined.to_csv(config.runs_log_path, index=False)
 
 
 def main() -> None:
@@ -102,6 +103,8 @@ def main() -> None:
             "n_estimators": config.n_estimators,
             "learning_rate": config.learning_rate,
             "max_depth": config.max_depth,
+            "subsample": config.subsample,
+            "min_samples_leaf": config.min_samples_leaf,
             "train_rmse": train_rmse,
             "train_mae": train_mae,
             "val_rmse": val_rmse,
