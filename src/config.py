@@ -23,10 +23,6 @@ class Config:
     date_column: str = "date"
     target_column: str = "aqi_pm2.5"
 
-    # Weather feature columns used for forecasting. Using the
-    # avg_* variants as the primary signal (min/max kept available
-    # in raw data but not used as features by default -- adding them
-    # is a straightforward extension, noted in README Future Work).
     weather_columns: List[str] = field(
         default_factory=lambda: [
             "avg_temp_f",
@@ -45,25 +41,31 @@ class Config:
     max_interpolation_gap_days: int = 3
 
     # Chronological split -- NEVER random-shuffle a time series.
-    # The most recent test_frac of the series is held out for
-    # final evaluation, and the val_frac before that for tuning.
     test_frac: float = 0.15
     val_frac: float = 0.15
 
-    # Feature engineering -- lags/rolling windows on the target itself
     lag_days: List[int] = field(default_factory=lambda: [1, 2, 3, 7, 14])
     rolling_windows: List[int] = field(default_factory=lambda: [3, 7, 14])
 
     # Model hyperparameters (GradientBoostingRegressor baseline).
-    # subsample < 1.0 and min_samples_leaf > 1 turn this into stochastic
-    # GBM, which regularizes against the overfitting seen in the first
-    # baseline (train RMSE 24.67 vs val 50.41, gap 25.74). These values
-    # were selected by src/tune.py's grid search over the chronological
-    # val split: val RMSE 50.41 -> 46.54, gap 25.74 -> 13.66.
+    # Selected by src/tune.py's grid search over the chronological val
+    # split: val RMSE 50.41 -> 46.54, gap 25.74 -> 13.66.
     n_estimators: int = 100
     learning_rate: float = 0.05
     max_depth: int = 3
     subsample: float = 0.85
     min_samples_leaf: int = 10
+
+    # Tail sample-weighting: trains with sample_weight=y_train (linear
+    # upweighting by AQI magnitude). This is a genuine trade-off, not a
+    # free improvement -- see src/tail_experiment.py's results: it
+    # improves tail MAE (>250 AQI) and shrinks the underprediction bias
+    # on high-AQI days, at the cost of worse overall RMSE/MAE. Enabled
+    # by default because MODEL_CARD.md's Ethical Considerations section
+    # already states a false "safe" prediction on a hazardous day is a
+    # more costly error than a false alarm -- this setting is that
+    # principle applied, not an arbitrary default. Set to False to
+    # revert to the pure-accuracy-optimized baseline.
+    use_tail_sample_weighting: bool = True
 
     random_state: int = 42

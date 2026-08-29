@@ -31,20 +31,13 @@ def plot_feature_importance(feature_names, importances, out_path: str, top_n: in
 def log_run(config: Config, metrics: dict) -> None:
     """Append one row of run metadata + metrics to reports/runs.csv.
 
-    Uses pandas concat + rewrite rather than a raw CSV append. This
-    project's run schema will keep evolving across phases (subsample
-    and min_samples_leaf are new this phase, use_tail_sample_weighting
-    arrives next phase) -- a naive csv.DictWriter append would silently
-    misalign columns the moment a new run's dict has different keys
-    than whatever the file's existing header happens to be. Reading +
-    concatenating + rewriting with pandas instead means mismatched
-    columns become NaN for the rows that don't have them, rather than
-    corrupting the file.
+    Uses pandas concat + rewrite rather than a raw CSV append -- see
+    Phase 8's fix. This phase adds use_tail_sample_weighting as a new
+    column, exactly the kind of schema growth this rewrite protects.
 
     Args:
         config: Project config with runs_log_path.
-        metrics: Dict of metric name -> value, plus any run metadata,
-            to write as one CSV row.
+        metrics: Dict of metric name -> value, plus any run metadata.
     """
     row = {"timestamp": datetime.now(timezone.utc).isoformat(), **metrics}
     os.makedirs(os.path.dirname(config.runs_log_path), exist_ok=True)
@@ -73,7 +66,8 @@ def main() -> None:
     X_val, y_val = split_X_y(val_df)
 
     pipeline = build_pipeline(config)
-    pipeline.fit(X_train, y_train)
+    sample_weight = y_train.values if config.use_tail_sample_weighting else None
+    pipeline.fit(X_train, y_train, model__sample_weight=sample_weight)
 
     train_pred = pipeline.predict(X_train)
     val_pred = pipeline.predict(X_val)
@@ -105,6 +99,7 @@ def main() -> None:
             "max_depth": config.max_depth,
             "subsample": config.subsample,
             "min_samples_leaf": config.min_samples_leaf,
+            "use_tail_sample_weighting": config.use_tail_sample_weighting,
             "train_rmse": train_rmse,
             "train_mae": train_mae,
             "val_rmse": val_rmse,
