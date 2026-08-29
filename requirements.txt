@@ -8,3 +8,9 @@ pytest
 fastapi
 uvicorn
 joblib
+
+# torch is only needed for src/train_lstm.py (the transition-lag
+# experiment) -- not for the core pipeline. Install separately:
+#   pip install torch
+# or, for a smaller CPU-only build:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
