@@ -7,19 +7,23 @@ Forecasts next-day AQI (PM2.5) for Lahore, Pakistan, from a recent window of dai
 ## Training Data
 
 - Source: Lahore Air Quality Index (Kaggle: shabbirchinioti/lahore-air-quality-index), date-wise AQI (PM2.5) and weather data for Lahore.
-- Coverage: 2019-06-01 to 2023-11-30 — 1,644 rows for 1,644 calendar days in that range. The calendar coverage is complete (0 missing days); an earlier draft of this document reported 157 missing calendar days, which was an artifact of a date-parsing bug (the source date format is DD-MM-YY, and an initial incorrect parse produced a scrambled, wider apparent date range). That bug was fixed in load_data.py before training; this corrected figure reflects the actual data.
-- Missingness: 221 of the 1,644 rows have a null aqi_pm2.5 value (~13.4% of rows) despite the row/date existing. This is the real source of missingness in this dataset. Short runs of missing values (<= 3 consecutive days) are linearly interpolated; longer runs are left as NaN and dropped rather than synthetically filled. After lag/rolling feature construction (which also drops the first ~14 rows for lack of lag history) and gap-drop, 1,285 usable rows remained — 359 rows dropped in total.
-- Known bias: this is a single-city dataset; the model has no exposure to other cities pollution dynamics (different traffic patterns, industrial mix, geography) and should not be assumed to generalize beyond Lahore.
+- Coverage: 2019-06-01 to 2023-11-30 -- 1,644 rows for 1,644 calendar days in that range. Calendar coverage is complete (0 missing days). An earlier draft of this document reported 157 missing calendar days -- an artifact of a date-parsing bug (fixed in load_data.py), corrected here.
+- Missingness: 221 of the 1,644 rows have a null aqi_pm2.5 value (~13.4% of rows). Short runs (<= 3 consecutive days) are linearly interpolated; longer runs are dropped rather than synthetically filled. After lag/rolling feature construction, 1,285 usable rows remained for the GBM pipeline (359 dropped total); the LSTM's sequence-based pipeline yields 1,294 usable 14-day sequences via a slightly different construction.
+- Known bias: single-city dataset; not validated to generalize beyond Lahore.
 
-## Model Architecture / Algorithm
+## Production Model
 
-scikit-learn Pipeline: StandardScaler -> GradientBoostingRegressor (n_estimators=300, learning_rate=0.05, max_depth=3). Chosen as a classical baseline over an LSTM/Transformer given the dataset size (~1,285 usable rows) -- see Limitations and Future Work for the DL upgrade path this baseline motivates.
+**GBM remains the production model**, after a direct, honest comparison against an LSTM (see Model Iterations #4 below). scikit-learn Pipeline: StandardScaler -> GradientBoostingRegressor, `n_estimators=100, learning_rate=0.05, max_depth=3, subsample=0.85, min_samples_leaf=10`, trained with `sample_weight=y_train` (tail sample-weighting). Hyperparameters selected by `src/tune.py`'s grid search against the chronological val split.
 
-Features (18 total): 5 lagged AQI values (1/2/3/7/14 days), rolling 7/14/3-day mean and std of AQI (computed on shifted history, no same-day leakage), and 5 same-day weather readings (temperature, dew point, humidity, wind speed, pressure). Target: next-day AQI.
+Quantile models (`src/train_quantiles.py`): same tree structure, `loss="quantile"` at alpha=0.1/0.9, unweighted.
+
+Features (18 total): 5 lagged AQI values, rolling 7/14/3-day mean and std, 5 same-day weather readings. Target: next-day AQI.
 
 ## Evaluation Metrics and Results
 
-Chronological split (never shuffled): train on 2019-2022, validate on 2022-2023, test on the most recent unseen window (2023-05 to 2023-11).
+Chronological split: train 2019-2022, val 2022-2023, test 2023-05 to 2023-11.
+
+**Baseline (v1)** -- original hyperparameters, unweighted:
 
 | Split | RMSE  | MAE   |
 |-------|-------|-------|
@@ -27,26 +31,68 @@ Chronological split (never shuffled): train on 2019-2022, validate on 2022-2023,
 | Val   | 50.41 | 35.60 |
 | Test  | 35.82 | 25.56 |
 
-Test RMSE/MAE fall between train and val, indicating the train/val gap reflects genuine period-to-period difficulty rather than val being an unrepresentative outlier.
+**Production (v2)** -- tuned hyperparameters + tail sample-weighting:
 
-Diagnostic figures (reports/figures/): eval_actual_vs_predicted.png, eval_residuals_over_time.png, eval_regression_diagnostics.png, train_feature_importance.png.
+| Split | RMSE  | MAE   |
+|-------|-------|-------|
+| Train | 33.83 | 25.19 |
+| Val   | 48.75 | 34.24 |
+| Test  | 36.14 | 26.60 |
+
+**Tail-specific results (test set, actual AQI > 250):**
+
+| Model | Tail MAE | 
+|-------|----------|
+| v1 (unweighted) | 41.41 |
+| v2 (tail-weighted, production) | 40.14 |
+
+## Uncertainty Quantification
+
+`predict.py` returns a real quantile-regression-derived band. Empirical coverage on val: **73.4%** against an 80% target -- reasonably close, reported as measured. Asymmetric by construction (wider on the high side, matching the right-skewed target).
+
+## Model Iterations (Post-Baseline Work)
+
+Four limitations addressed directly, in increasing order of effort, every change tested honestly:
+
+**1. Overfitting (`src/tune.py`).** Grid search shrank the train/val RMSE gap substantially; test-set improvement was modest, not dramatic.
+
+**2. Tail underestimation (`src/tail_experiment.py`).** sample_weight=y_train: real trade-off -- tail MAE improved (41.41 -> 40.14 on test), overall test RMSE/MAE ticked up slightly (35.82 -> 36.14, 25.56 -> 26.60). Adopted, given the project's own stated ethics (see below).
+
+**3. Naive uncertainty band (`src/train_quantiles.py`).** Replaced with real quantile regression -- 73.4% empirical coverage against an 80% target.
+
+**4. Transition-lag (`src/transition_experiment.py`, `src/train_lstm.py`).** Two attempts, both run for real and reported honestly:
+   - Hand-engineered momentum/delta features: **made things worse** (val RMSE 48.00 -> 48.36, volatile-day MAE 52.75 -> 54.32). Not adopted.
+   - An LSTM (14-day sequences, single-layer, 32 hidden units, early-stopped) was built, and its first run produced a test RMSE of 104.81 -- close enough to the test set's own standard deviation (77.58) to indicate the network hadn't meaningfully learned anything, not that LSTMs are inherently worse here. Root cause: the regression target was left unnormalized while input features were standardized, likely preventing the small network from converging within the epoch budget. Fixed by normalizing the target too (train-set statistics, inverse-transformed before any metric is computed) -- test RMSE dropped to 32.36.
+
+   **Direct, same-test-set comparison (`src/compare_models.py`):**
+
+   | Metric | GBM (production) | LSTM |
+   |---|---|---|
+   | Test RMSE | 36.14 | **32.36** |
+   | Test MAE | 26.60 | **23.12** |
+   | Tail MAE (>250) | 40.14 | **37.41** |
+   | Volatile-day MAE | **48.43** | 48.95 |
+
+   **Honest read:** the LSTM wins on overall accuracy and tail behavior by a real, meaningful margin. But on volatile-day MAE -- the specific metric this whole experiment was built to fix -- the two are within noise of each other (0.52 points on n=40), with GBM marginally ahead. The LSTM is a genuinely better general forecaster; it did not clearly solve the specific transition-lag problem that motivated building it.
+
+   **Decision: GBM stays production.** Promoting the LSTM would require real, unbuilt engineering -- torch as a hard dependency, a new uncertainty-quantification approach (no quantile-LSTM equivalent exists yet), an API rework, and loss of the interpretability the GBM's feature-importance plot provides -- in exchange for a win that is real in aggregate but doesn't clearly address the motivating problem. The LSTM code, results, and this reasoning are kept here as validated future work, not discarded.
 
 ## Limitations
 
-1. Underestimates extreme tail values. The target distribution is right-skewed (bulk of values 100-200, tail to ~500). The MSE-trained model systematically underpredicts actual AQI above ~300 -- the exact regime where accurate warning matters most.
-2. Lags during rapid AQI transitions. The model leans heavily on aqi_lag_1 and aqi_roll_mean_7, so it tracks slow-moving trends well but is measurably slower to react during sharp smog-onset swings.
-3. Mild overfitting. Train RMSE (24.67) is meaningfully lower than held-out RMSE (35.82 test, 50.41 val) at current hyperparameters.
-4. Weather features are same-day observed values, not forecasts. A real deployment would need next-day weather forecasts as input, not next-day weather observations -- the test error already includes this simplification and would need re-evaluation with real forecast inputs before any operational use.
-5. Single-city, single-pollutant. Trained only on Lahore PM2.5-derived AQI; not validated for other cities or composite multi-pollutant AQI.
-6. Uncertainty band is naive. predict.py's uncertainty band is forecast +/- test RMSE, not a calibrated prediction interval -- it should not be read as a statistically rigorous confidence interval.
+1. **Tail underestimation, improved but not solved.** Real bias remains even with tail sample-weighting.
+2. **Transition-lag, genuinely tested, not clearly solved by either approach tried.** Feature engineering made it worse; the LSTM roughly ties the GBM on this specific axis despite winning elsewhere.
+3. **Mild overfitting persists**, reduced but not eliminated by tuning.
+4. **Weather features are same-day observed, not forecast.**
+5. **Single-city, single-pollutant.**
+6. **Uncertainty band is real but imperfectly calibrated** (73.4% vs 80% target).
 
 ## Future Work
 
-- LSTM/Temporal Fusion Transformer upgrade, directly motivated by Limitation 2 (transition-lag).
-- Quantile regression for calibrated (non-naive) uncertainty bands.
-- Multi-city extension (e.g. adding the Islamabad Kaggle dataset) to test generalization.
-- Swap same-day weather for a real weather-forecast API input.
+- Promote the LSTM to production IF a calibrated uncertainty approach for it is built first (e.g. MC-dropout or a quantile-loss LSTM) -- the accuracy case is there; the supporting infrastructure isn't yet.
+- Multi-city extension to increase effective training data, which may be what genuinely resolves the transition-lag tie either way.
+- Isotonic recalibration for the quantile bands.
+- Real weather-forecast input instead of same-day observed weather.
 
 ## Ethical Considerations
 
-This tool forecasts environmental risk that disproportionately harms already-vulnerable groups (children, the elderly, people with respiratory conditions, outdoor workers). A false "safe" prediction during an actual hazardous-AQI day is a more costly error than a false alarm -- Limitation 1 (tail underestimation) means this baseline current error pattern skews toward the more costly direction, and should be corrected before any real-world advisory use.
+This tool forecasts environmental risk that disproportionately harms already-vulnerable groups. A false "safe" prediction on a hazardous day is a more costly error than a false alarm. This was applied concretely in tail sample-weighting (Model Iterations #2) and was a real factor in weighing whether the LSTM's mixed result on the safety-relevant transition-lag metric was enough to justify a production swap -- it wasn't, given the specific axis that matters most didn't clearly improve.
